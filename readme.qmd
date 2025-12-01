@@ -1,0 +1,14 @@
+---
+title: "Untitled"
+format: gfm
+---
+
+## Example 
+
+this is an example
+
+
+```{python}
+2 + 2 
+
+```
