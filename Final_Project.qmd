@@ -1,0 +1,436 @@
+---
+title: "Final Project"
+author: "Michael Fulmer"
+format:
+  html:
+    toc: true
+    toc-location: left
+    self-contained: true
+jupyter: python3
+---
+
+## 1. Load libraries and setup
+```{python}
+import json
+import pandas as pd
+import requests
+import pickle
+import statsmodels.api as sm
+import plotly.express as px
+```
+
+## 2. Download weekly stock prices from Alpha Vantage
+```{python}
+
+av_k = "YOUR_AV_KEY_HERE"
+
+av_symbol = ["NVDA", "AAPL", "MSFT", "GOOGL", "AVGO", "META", "TSM", "ORCL", "PLTR", "ASML"]
+
+data = []
+
+for s in av_symbol:
+  av_link = "https://www.alphavantage.co/query?function=TIME_SERIES_WEEKLY_ADJUSTED&symbol={}&apikey={}".format(s, av_k)
+  av_request = requests.get(av_link)
+  av_json = av_request.json()
+  series_data = av_json['Weekly Adjusted Time Series']
+  meta_data = av_json['Meta Data']
+  av_data = pd.DataFrame.from_dict(series_data, orient='index')
+  av_data['symbol'] = meta_data['2. Symbol']
+  av_data.reset_index(inplace = True)
+  av_data = av_data.rename(columns = {'index':'date'})
+  data.append(av_data)
+
+
+```
+
+```{python}
+df = pd.concat(data, ignore_index=True)
+df
+
+```
+
+## 3. Clean and prepare price data
+## Rename
+```{python}
+df = df.rename(columns={
+    '1. open': 'open',
+    '2. high': 'high',
+    '3. low': 'low',
+    '4. close': 'close',
+    '5. adjusted close': 'adj_close',
+    '6. volume': 'volume',
+    '7. dividend amount': 'dividend'
+})
+
+```
+
+## Change type
+```{python}
+for col in ['open','high','low','close','adj_close','volume','dividend']:
+    df[col] = df[col].astype(float)
+
+df['date'] = pd.to_datetime(df['date'])
+
+```
+
+## Sort
+```{python}
+df = df.sort_values(['symbol', 'date'], ascending = [True,False])
+df
+```
+
+## Read in file included (`all_prices.pkl`) unless pulling from the API.
+*If you already downloaded fresh price data using the API above, skip this step to avoid overwriting your newly created `df` dataset.*
+
+```{python}
+df = pd.read_pickle('all_prices.pkl')
+```
+
+## 4. Plot weekly adjusted closing prices
+```{python}
+
+fig1 = px.line(df, 
+x ='date', 
+y= 'adj_close',
+color='symbol',
+markers = False,
+title= "Weekly Adjusted Closing Prices (Full History)"
+)
+
+fig1
+```
+
+## 5. Focus on 2020–present period
+```{python}
+
+df_2020 = df[df['date'] >= '2020-01-01']
+df_2020
+
+fig2 = px.line(df_2020, 
+x ='date', 
+y= 'adj_close',
+color='symbol',
+markers = False,
+title= "Weekly Adjusted Closing Prices (2020–Present)"
+)
+
+fig2
+
+
+```
+
+## 6. Compute weekly returns 
+```{python}
+
+df_2020['returns'] = df_2020.groupby('symbol')['adj_close'].pct_change()
+df_2020
+
+```
+
+## 7. Select specific stocks for return analysis
+```{python}
+#options ["NVDA", "AAPL", "MSFT", "GOOGL", "AVGO", "META", "TSM", "ORCL", "PLTR", "ASML"]
+specific_stocks = ['NVDA', 'AAPL', 'MSFT'] 
+
+stocks = df_2020[df_2020['symbol'].isin(specific_stocks)]
+stocks
+```
+
+## Weekly Returns by Company
+```{python}
+
+
+fig3 = px.line(stocks, 
+x ='date', 
+y= 'returns',
+facet_col='symbol',
+markers = False,
+facet_col_wrap= 1,
+title= "Weekly Returns Over Time by Company"
+)
+
+fig3
+
+```
+
+## 8. Return distribution and volatility
+```{python}
+px.box(stocks, x='symbol', y='returns',
+       title="Weekly Return Distribution by Stock")
+
+```
+
+## 9. Download news sentiment data
+Articles are categorized by tickers mentioned, so some stories only reference a ticker in passing, which can introduce noise.
+```{python}
+
+av_k = "YOUR_AV_KEY_HERE"
+
+av_symbol = ["NVDA", "AAPL", "MSFT", "GOOGL", "AVGO", "META", "TSM", "ORCL", "PLTR", "ASML"]
+
+news_df = []
+
+for s in av_symbol:
+    url = 'https://www.alphavantage.co/query?function=NEWS_SENTIMENT&tickers={}&topics=technology,earnings&time_from=20200101T0000&limit=1000&apikey={}'.format(s, av_k)
+    av_request = requests.get(url)
+    av_json = av_request.json()
+    feed = av_json.get('feed', [])
+    for item in feed:
+        time_published = item.get('time_published')
+        overall_sentiment_score = item.get('overall_sentiment_score')
+        overall_sentiment_label = item.get('overall_sentiment_label')
+        for tic in item.get('ticker_sentiment', []):
+            if tic.get('ticker') == s:
+                news_df.append({
+                    'symbol' : s,
+                    'release_d' : time_published,
+                    'overall_sentiment_score' : overall_sentiment_score,
+                    'overall_label' : overall_sentiment_label,
+                    'ticker_sentiment' : tic.get('ticker_sentiment_score'),
+                    'ticker_sent_label' : tic.get('ticker_sentiment_label'),
+                    'title' : item.get('title'),
+                    'source' : item.get('source')
+                })
+
+
+
+```
+
+```{python}
+
+news_sentiment_df = pd.DataFrame(news_df)
+news_sentiment_df
+
+```
+
+## Rename columns and format
+```{python}
+news_sentiment_df = news_sentiment_df.rename(columns={'release_d' : 'date'})
+
+news_sentiment_df['date'] = pd.to_datetime(news_sentiment_df['date'])
+
+news_sentiment_df['ticker_sentiment'] = news_sentiment_df['ticker_sentiment'].astype(float)
+news_sentiment_df
+```
+
+## Read file in ('news.pk2') unless pulling from API.
+*If you downloaded fresh data using the API above, skip this and continue using your existing `news_sentiment_df`.*
+
+```{python}
+news_sentiment_df = pd.read_pickle('news.pk2')
+```
+
+## Check different sentiment classes
+```{python}
+
+news_sentiment_df['overall_label'].unique()
+
+```
+
+## Media Coverage by Company
+```{python}
+
+article_counts = news_sentiment_df.groupby('symbol').size().reset_index(name = 'counts')
+
+```
+
+## Total Article Volume by Company'
+```{python}
+px.bar(article_counts,
+x = 'symbol',
+y = 'counts',
+title = 'Total Article Volume by Company')
+
+
+
+```
+
+## Amount of articles by type
+```{python}
+type_counts = news_sentiment_df.groupby(['symbol', 'ticker_sent_label']).size().reset_index(name = 'counts')
+
+```
+
+## News Sentiment Breakdown by Company
+```{python}
+px.bar(type_counts,
+x = 'symbol',
+y = 'counts',
+color = 'ticker_sent_label',
+barmode= 'group',
+title = 'News Sentiment Breakdown by Company')
+
+```
+
+## Sentiment 
+```{python}
+
+px.box(news_sentiment_df,
+x = 'symbol',
+y = 'ticker_sentiment',
+color = 'symbol',
+title = 'News Sentiment Score Distribution (2020–2025)'
+)
+
+
+
+```
+
+## Convert to weekly and merge
+
+```{python}
+df_2020['week'] = df_2020['date']
+```
+
+```{python}
+news_sentiment_df['week'] = news_sentiment_df['date'].dt.to_period('W-Thu').dt.to_timestamp()
+
+```
+
+## Read in file included ('news.pk2') unless using API pull.
+*If you already used the API to fetch fresh sentiment data, skip this step to avoid overwriting.*
+
+```{python}
+news_sentiment_df = pd.read_pickle('news.pk2')
+```
+
+```{python}
+merged_df = df_2020.merge(news_sentiment_df,on = ['symbol', 'week'], how = 'left')
+merged_df
+
+```
+
+
+```{python}
+
+condensed_df = merged_df[['symbol', 'week', 'ticker_sentiment', 'returns' ]]
+condensed_df
+
+```
+
+## Returns are week by week. Ticker_sentiment are from news during the week so must aggregate to get weekly overall sentiment. 
+
+```{python}
+
+weekly_sentiment = news_sentiment_df.groupby(['symbol', 'week'])['ticker_sentiment'].mean().reset_index()
+weekly_sentiment
+
+```
+
+```{python}
+
+week_and_return = df_2020[['symbol', 'week', 'returns']]
+week_and_return
+
+```
+
+```{python}
+
+merged_2 = weekly_sentiment.merge(week_and_return, on = ['symbol', 'week'], how = 'left')
+merged_2
+
+```
+
+
+## 10. Sample selection and data limitations
+Some tickers quickly reached the API’s 1,000-article limit, concentrated in a short time window. As a result, those stocks have relatively few weeks with usable average sentiment, which makes weekly return correlations unstable. To focus on stocks with enough overlapping weeks of price and sentiment data, I restrict the main analysis to AAPL, META, ORCL, and PLTR (each has 50+ weeks with non-missing sentiment). 
+Note: Many articles only mention a ticker in passing rather than focusing on the company, which introduces noise. A possible improvement would be to filter to articles where the ticker appears in the title or has very high relevance.
+
+
+```{python}
+week_counts = merged_2.groupby('symbol')['week'].count().reset_index(name='weeks')
+
+px.bar(week_counts,
+    x='symbol',
+    y='weeks',
+    color = 'symbol',
+    title="Weeks with Sentiment Data (2020–2025)")
+
+
+```
+
+
+
+## 11. Restrict sample to four main companies
+```{python}
+
+symbol_remove = ['ASML', 'AVGO', 'GOOGL', 'MSFT', 'NVDA', 'TSM']
+
+four_companies = merged_2[~merged_2['symbol'].isin(symbol_remove)]
+four_companies
+
+
+```
+
+## 12. Correlation of sentiment and same week returns
+```{python}
+
+correlation = four_companies.groupby('symbol').apply(lambda g: g['ticker_sentiment'].corr(g['returns'])).reset_index(name='corr')
+correlation
+```
+
+
+
+## Same-Week Sentiment vs Returns
+```{python}
+
+
+fig4 = px.scatter(four_companies,
+x = 'ticker_sentiment',
+y = 'returns',
+color = 'symbol',
+facet_col='symbol',
+facet_col_wrap=2,
+trendline='ols',
+opacity=0.5,
+title='Weekly Returns vs News Sentiment'
+) 
+
+
+fig4
+
+
+
+```
+
+## Sentiment Distribution
+```{python}
+fig5 = px.box(four_companies, x='symbol', y='ticker_sentiment', title="Weekly News Sentiment Scores by Company")
+
+fig5
+```
+
+
+## 13. Lagged analysis of sentiment and next week returns
+```{python}
+
+four_companies['returns_lead'] = four_companies.groupby('symbol')['returns'].shift(-1)
+
+lag_corr = four_companies.groupby('symbol').apply(
+    lambda g: g['ticker_sentiment'].corr(g['returns_lead'])
+)
+
+lag_corr
+
+```
+
+
+## Lagged Sentiment vs Next-Week Returns
+```{python}
+
+fig6 = px.scatter(four_companies,
+x = 'ticker_sentiment',
+y = 'returns_lead',
+color = 'symbol',
+facet_col='symbol',
+facet_col_wrap=2,
+trendline='ols',
+opacity=0.5,
+title="Next-Week Returns vs Current-Week Sentiment"
+) 
+
+
+fig6
+
+
+```
