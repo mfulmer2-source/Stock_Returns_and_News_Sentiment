@@ -54,7 +54,6 @@ report for the final project.
 
 - `Final_Project.qmd` — main analysis file containing all code for data
   collection, cleaning, merging, and visualization  
-- `readme.qmd` — source file for the written report (this README)  
 - `README.md` — rendered written report in GitHub Markdown  
 - `all_prices.pkl` — saved and cleaned weekly stock price data  
 - `news.pk2` — processed and cleaned news sentiment data
@@ -344,7 +343,8 @@ patterns.
 ### Article Volume and Sentiment
 
 - META and AAPL had the most news coverage.
-- Sentiment distributions were primarily neutral to mildly negative.
+- Sentiment distributions were dominated by Neutral and Somewhat-Bullish
+  articles, with Bullish appearing less frequently.
 
 ### Same-Week Sentiment vs Returns
 
